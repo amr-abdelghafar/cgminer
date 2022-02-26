@@ -1,6 +1,6 @@
 /*
  * Copyright 2013 Avalon project
- * Copyright 2013-2014 Con Kolivas <kernel@kolivas.org>
+ * Copyright 2013 Con Kolivas <kernel@kolivas.org>
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms of the GNU General Public License as published by the Free
@@ -21,10 +21,6 @@
 #define AVALON_IO_SPEED		115200
 #define AVALON_HASH_TIME_FACTOR	((float)1.67/0x32)
 #define AVALON_RESET_PITCH	(300*1000*1000)
-
-
-#define AVALON_A3256	110
-#define AVALON_A3255	55
 
 #define AVALON_FAN_FACTOR 120
 #define AVALON_PWM_MAX 0xA0
@@ -52,7 +48,7 @@
 
 #define AVALON_DEFAULT_TIMEOUT 0x2D
 #define AVALON_MIN_FREQUENCY 256
-#define AVALON_MAX_FREQUENCY 2000
+#define AVALON_MAX_FREQUENCY 1024
 #define AVALON_TIMEOUT_FACTOR 12690
 #define AVALON_DEFAULT_FREQUENCY 282
 #define AVALON_DEFAULT_MINER_NUM 0x20
@@ -69,8 +65,9 @@
 
 #define AVALON_FTDI_READSIZE 510
 #define AVALON_READBUF_SIZE 8192
-/* Set latency to just less than full 64 byte packet size at 115200 baud */
-#define AVALON_LATENCY 4
+#define AVALON_RESET_TIMEOUT 100
+#define AVALON_READ_TIMEOUT 18 /* Enough to only half fill the buffer */
+#define AVALON_LATENCY 1
 
 struct avalon_task {
 	uint8_t reset		:1;
@@ -128,6 +125,7 @@ struct avalon_info {
 	int temp0;
 	int temp1;
 	int temp2;
+	int temp_max;
 	int temp_history_count;
 	int temp_history_index;
 	int temp_sum;
@@ -140,7 +138,6 @@ struct avalon_info {
 	int matching_work[AVALON_MAX_MINER_NUM];
 
 	int frequency;
-	uint32_t asic;
 	uint32_t ctlr_ver;
 
 	struct thr_info *thr;
@@ -149,15 +146,11 @@ struct avalon_info {
 	pthread_mutex_t lock;
 	pthread_mutex_t qlock;
 	cgsem_t qsem;
-	cgtimer_t cgsent;
-	int send_delay;
-
 	int nonces;
+
 	int auto_queued;
 	int auto_nonces;
 	int auto_hw;
-	int increment;
-	int decrement;
 
 	int idle;
 	bool reset;

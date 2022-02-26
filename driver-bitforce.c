@@ -24,6 +24,10 @@
 #include "usbutils.h"
 #include "util.h"
 
+#ifdef WIN32
+#include <windows.h>
+#endif /* WIN32 */
+
 #define BITFORCE_IDENTIFY "ZGX"
 #define BITFORCE_IDENTIFY_LEN (sizeof(BITFORCE_IDENTIFY)-1)
 #define BITFORCE_FLASH "ZMX"
@@ -158,7 +162,7 @@ failed:
 		mutex_unlock(&bitforce->device_mutex);
 }
 
-static struct cgpu_info *bitforce_detect_one(struct libusb_device *dev, struct usb_find_devices *found)
+static bool bitforce_detect_one(struct libusb_device *dev, struct usb_find_devices *found)
 {
 	char buf[BITFORCE_BUFSIZ+1];
 	int err, amount;
@@ -266,7 +270,7 @@ reinit:
 
 	mutex_init(&bitforce->device_mutex);
 
-	return bitforce;
+	return true;
 
 unshin:
 
@@ -281,7 +285,7 @@ shin:
 
 	bitforce = usb_free_cgpu(bitforce);
 
-	return NULL;
+	return false;
 }
 
 static void bitforce_detect(bool __maybe_unused hotplug)
@@ -294,7 +298,11 @@ static void get_bitforce_statline_before(char *buf, size_t bufsiz, struct cgpu_i
 	float gt = bitforce->temp;
 
 	if (gt > 0)
-		tailsprintf(buf, bufsiz, "%5.1fC", gt);
+		tailsprintf(buf, bufsiz, "%5.1fC ", gt);
+	else
+		tailsprintf(buf, bufsiz, "       ");
+
+	tailsprintf(buf, bufsiz, "        | ");
 }
 
 static bool bitforce_thread_prepare(__maybe_unused struct thr_info *thr)
@@ -475,18 +483,18 @@ re_send:
 	memcpy(ob + 8 + 32, work->data + 64, 12);
 	if (!bitforce->nonce_range) {
 		sprintf((char *)ob + 8 + 32 + 12, ">>>>>>>>");
-		work->nonce = bitforce->nonces = 0xffffffff;
+		work->blk.nonce = bitforce->nonces = 0xffffffff;
 		len = 60;
 	} else {
 		uint32_t *nonce;
 
 		nonce = (uint32_t *)(ob + 8 + 32 + 12);
-		*nonce = htobe32(work->nonce);
+		*nonce = htobe32(work->blk.nonce);
 		nonce = (uint32_t *)(ob + 8 + 32 + 12 + 4);
 		/* Split work up into 1/5th nonce ranges */
 		bitforce->nonces = 0x33333332;
-		*nonce = htobe32(work->nonce + bitforce->nonces);
-		work->nonce += bitforce->nonces + 1;
+		*nonce = htobe32(work->blk.nonce + bitforce->nonces);
+		work->blk.nonce += bitforce->nonces + 1;
 		sprintf((char *)ob + 8 + 32 + 12 + 8, ">>>>>>>>");
 		len = 68;
 	}
@@ -626,12 +634,12 @@ static int64_t bitforce_get_result(struct thr_info *thr, struct work *work)
 #ifndef __BIG_ENDIAN__
 		nonce = swab32(nonce);
 #endif
-		if (unlikely(bitforce->nonce_range && (nonce >= work->nonce ||
-			(work->nonce > 0 && nonce < work->nonce - bitforce->nonces - 1)))) {
+		if (unlikely(bitforce->nonce_range && (nonce >= work->blk.nonce ||
+			(work->blk.nonce > 0 && nonce < work->blk.nonce - bitforce->nonces - 1)))) {
 				applog(LOG_WARNING, "%s%i: Disabling broken nonce range support",
 					bitforce->drv->name, bitforce->device_id);
 				bitforce->nonce_range = false;
-				work->nonce = 0xffffffff;
+				work->blk.nonce = 0xffffffff;
 				bitforce->sleep_ms *= 5;
 				bitforce->kname = KNAME_WORK;
 		}

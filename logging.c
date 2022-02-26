@@ -17,6 +17,8 @@
 
 bool opt_debug = false;
 bool opt_log_output = false;
+int last_date_output_day = 0;
+int opt_log_dateformat = 0;
 
 /* per default priorities higher than LOG_NOTICE are logged */
 int opt_log_level = LOG_NOTICE;
@@ -54,7 +56,7 @@ void _applog(int prio, const char *str, bool force)
 {
 #ifdef HAVE_SYSLOG_H
 	if (use_syslog) {
-		syslog(LOG_LOCAL0 | prio, "%s", str);
+		syslog(prio, "%s", str);
 	}
 #else
 	if (0) {}
@@ -67,16 +69,37 @@ void _applog(int prio, const char *str, bool force)
 		cgtime(&tv);
 
 		const time_t tmp_time = tv.tv_sec;
-		int ms = (int)(tv.tv_usec / 1000);
 		tm = localtime(&tmp_time);
 
-		snprintf(datetime, sizeof(datetime), " [%d-%02d-%02d %02d:%02d:%02d.%03d] ",
-			tm->tm_year + 1900,
-			tm->tm_mon + 1,
-			tm->tm_mday,
-			tm->tm_hour,
-			tm->tm_min,
-			tm->tm_sec, ms);
+		if ((opt_log_dateformat == 0) && (last_date_output_day != tm->tm_mday))
+		{
+			last_date_output_day = tm->tm_mday;
+			char date_output_str[64];
+			snprintf(date_output_str, sizeof(date_output_str), "Log date is now %d-%02d-%02d",
+				tm->tm_year + 1900,
+				tm->tm_mon + 1,
+				tm->tm_mday);
+			_applog(prio, date_output_str, force);
+			
+		}
+
+		if (opt_log_dateformat == 1)
+		{
+			snprintf(datetime, sizeof(datetime), " [%d-%02d-%02d %02d:%02d:%02d] ",
+				tm->tm_year + 1900,
+				tm->tm_mon + 1,
+				tm->tm_mday,
+				tm->tm_hour,
+				tm->tm_min,
+				tm->tm_sec);
+		}
+		else
+		{
+			snprintf(datetime, sizeof(datetime), " [%02d:%02d:%02d] ",
+				tm->tm_hour,
+				tm->tm_min,
+				tm->tm_sec);
+		}
 
 		/* Only output to stderr if it's not going to the screen as well */
 		if (!isatty(fileno((FILE *)stderr))) {
@@ -85,25 +108,5 @@ void _applog(int prio, const char *str, bool force)
 		}
 
 		my_log_curses(prio, datetime, str, force);
-	}
-}
-
-void _simplelog(int prio, const char *str, bool force)
-{
-#ifdef HAVE_SYSLOG_H
-	if (use_syslog) {
-		syslog(LOG_LOCAL0 | prio, "%s", str);
-	}
-#else
-	if (0) {}
-#endif
-	else {
-		/* Only output to stderr if it's not going to the screen as well */
-		if (!isatty(fileno((FILE *)stderr))) {
-			fprintf(stderr, "%s\n", str);	/* atomic write to stderr */
-			fflush(stderr);
-		}
-
-		my_log_curses(prio, "", str, force);
 	}
 }

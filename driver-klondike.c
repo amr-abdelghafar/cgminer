@@ -21,6 +21,10 @@
 
 #include "config.h"
 
+#ifdef WIN32
+#include <windows.h>
+#endif
+
 #include "compat.h"
 #include "miner.h"
 #include "usbutils.h"
@@ -761,7 +765,7 @@ static void control_init(struct cgpu_info *klncgpu)
 			  klncgpu->drv->name, klncgpu->device_id, err);
 }
 
-static struct cgpu_info *klondike_detect_one(struct libusb_device *dev, struct usb_find_devices *found)
+static bool klondike_detect_one(struct libusb_device *dev, struct usb_find_devices *found)
 {
 	struct cgpu_info *klncgpu = usb_alloc_cgpu(&klondike_drv, 1);
 	struct klondike_info *klninfo = NULL;
@@ -819,7 +823,7 @@ static struct cgpu_info *klondike_detect_one(struct libusb_device *dev, struct u
 				applog(LOG_DEBUG, "Klondike cgpu added");
 				rwlock_init(&klninfo->stat_lock);
 				cglock_init(&klninfo->klist_lock);
-				return klncgpu;
+				return true;
 			}
 		}
 		usb_uninit(klncgpu);
@@ -827,7 +831,7 @@ static struct cgpu_info *klondike_detect_one(struct libusb_device *dev, struct u
 	free(klninfo->free);
 	free(klninfo);
 	free(klncgpu);
-	return NULL;
+	return false;
 }
 
 static void klondike_detect(bool __maybe_unused hotplug)
@@ -1125,28 +1129,26 @@ static void klondike_flush_work(struct cgpu_info *klncgpu)
 	KLINE kline;
 	int slaves, dev;
 
-	if (klninfo->initialised) {
-		wr_lock(&(klninfo->stat_lock));
-		klninfo->block_seq++;
-		slaves = klninfo->status[0].kline.ws.slavecount;
-		wr_unlock(&(klninfo->stat_lock));
+	wr_lock(&(klninfo->stat_lock));
+	klninfo->block_seq++;
+	slaves = klninfo->status[0].kline.ws.slavecount;
+	wr_unlock(&(klninfo->stat_lock));
 
-		applog(LOG_DEBUG, "%s%i: flushing work",
-				  klncgpu->drv->name, klncgpu->device_id);
-		zero_kline(&kline);
-		kline.hd.cmd = KLN_CMD_ABORT;
-		for (dev = 0; dev <= slaves; dev++) {
-			kline.hd.dev = dev;
-			kitem = SendCmdGetReply(klncgpu, &kline, KSENDHD(0));
-			if (kitem != NULL) {
-				wr_lock(&(klninfo->stat_lock));
-				memcpy((void *)&(klninfo->status[dev]),
-					kitem,
-					sizeof(klninfo->status[dev]));
-				klninfo->jobque[dev].flushed = true;
-				wr_unlock(&(klninfo->stat_lock));
-				kitem = release_kitem(klncgpu, kitem);
-			}
+	applog(LOG_DEBUG, "%s%i: flushing work",
+			  klncgpu->drv->name, klncgpu->device_id);
+	zero_kline(&kline);
+	kline.hd.cmd = KLN_CMD_ABORT;
+	for (dev = 0; dev <= slaves; dev++) {
+		kline.hd.dev = dev;
+		kitem = SendCmdGetReply(klncgpu, &kline, KSENDHD(0));
+		if (kitem != NULL) {
+			wr_lock(&(klninfo->stat_lock));
+			memcpy((void *)&(klninfo->status[dev]),
+				kitem,
+				sizeof(klninfo->status[dev]));
+			klninfo->jobque[dev].flushed = true;
+			wr_unlock(&(klninfo->stat_lock));
+			kitem = release_kitem(klncgpu, kitem);
 		}
 	}
 }
@@ -1413,6 +1415,7 @@ static void get_klondike_statline_before(char *buf, size_t siz, struct cgpu_info
 	uint16_t fan = 0;
 	uint16_t clock = 0;
 	int dev, slaves;
+	char tmp[16];
 
 	if (klninfo->status == NULL) {
 		blank_get_statline_before(buf, siz, klncgpu);
@@ -1429,15 +1432,18 @@ static void get_klondike_statline_before(char *buf, size_t siz, struct cgpu_info
 	}
 	rd_unlock(&(klninfo->stat_lock));
 	fan /= slaves + 1;
-	//fan *= 100/255; // <-- You can't do this because int 100 / int 255 == 0
-        fan = 100 * fan / 255;
-	if (fan > 100)
-		fan = 100;
+	fan *= 100/255;
+	if (fan > 99) // short on screen space
+		fan = 99;
 	clock /= slaves + 1;
 	if (clock > 999) // error - so truncate it
 		clock = 999;
 
-	tailsprintf(buf, siz, "%3dMHz %3d%% %.1fC", (int)clock, (int)fan, cvtKlnToC(temp));
+	snprintf(tmp, sizeof(tmp), "%2.0fC", cvtKlnToC(temp));
+	if (strlen(tmp) < 4)
+		strcat(tmp, " ");
+
+	tailsprintf(buf, siz, "%3dMHz %2d%% %s| ", (int)clock, fan, tmp);
 }
 
 static struct api_data *klondike_api_stats(struct cgpu_info *klncgpu)
